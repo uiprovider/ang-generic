@@ -1,0 +1,261 @@
+import { environment } from '../../../environments/environment';
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { Observable, of } from 'rxjs';
+import { catchError, tap, map } from 'rxjs/operators';
+import { NotificationService } from './notification.service';
+import { Notify } from '../models/notify';
+import { TokenStorage } from '../auth/token-storage.service';
+import { HttpNotify } from '../models/httpnotify';
+import { Router } from '@angular/router';
+
+const serverURL = environment.baseURL;
+interface Value {
+  message: any;
+  code: string;
+  type: string;
+}
+
+interface ResponseHandler {
+  response: any;
+  datas: any;
+  message: any;
+}
+@Injectable({
+  providedIn: 'root'
+})
+export class HttpService {
+
+  private notifyObj: Notify;
+  public getval;
+  constructor(
+    private http: HttpClient,
+    public notifyService: NotificationService,
+    private tokenStorage: TokenStorage,
+    private router: Router
+  ) { }
+
+  /* GET request to server. */
+  public get<T>(URL: string, params?: any, notify?: HttpNotify | null): Observable<T> {
+    return this.http.get<T>(
+      serverURL + URL,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        params: params
+      }
+    ).pipe(
+      tap(datas => notify ? this.showNotify(notify, datas) : ''),
+      map((datas: T) => this.validateResponse(<T>datas)),
+      catchError(this.httpError<any>('Get Request', notify))
+    );
+  }
+
+  /* POST request to server. */
+  public post<T>(URL: string, params?: any | {}, notify?: HttpNotify | null): Observable<T> {
+    return this.http.post<T>(
+      serverURL + URL,
+      params,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+      }
+    ).pipe(
+      tap(datas => this.showNotify(notify, datas)),
+      map((datas: T) => this.validateResponse(<T>datas)),
+      catchError(this.httpError<any>('Post Request', notify))
+    );
+  }
+
+  /* PUT request for update datas from server. */
+  public update<T>(URL: string, params: any, notify?: HttpNotify | null): Observable<T> {
+    console.log(params);
+    return this.http.put<T>(
+      serverURL + URL,
+      params,
+      { headers: this.generateHeaders(), withCredentials: true, }
+    ).pipe(
+      tap(datas => notify ? this.showNotify(notify, datas) : ''),
+      map((datas: T) => this.validateResponse(<T>datas)),
+      catchError(this.httpError<any>('Update Request', notify))
+    );
+  }
+
+  // public change_password<T>(URL: string, params: any, notify?: HttpNotify | null): Observable<T> {
+  //   return this.http.post<T>(
+  //     serverURL+URL,
+  //     params,
+  //     { headers : this.generateHeaders(), withCredentials: true, }
+  //   ).pipe(
+  //     tap(datas => notify ? this.showNotify(notify,datas) : ""),
+  //     map((datas : T) => this.validateResponse(<T>datas)),
+  //     catchError(this.httpError<any>("Update Request",notify))
+  //   );
+  // }
+
+  /* DELETE request to remove datas from server */
+  public delete<T>(URL: string, params: any, notify?: HttpNotify | null): Observable<T> {
+    return this.http.delete<T>(
+      serverURL + URL,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        params: params
+      }
+    ).pipe(
+      tap(datas => notify ? this.showNotify(notify, datas) : ''),
+      map((datas: T) => this.validateResponse(<T>datas)),
+      catchError(this.httpError<any>('Delete Request', notify))
+    );
+  }
+
+  /* Capture server/request error */
+  private httpError<T>(operation = '', notify: HttpNotify | null, result?: T): any {
+    return (data: any): Observable<T> => {
+      console.error(operation);
+      console.error(data);
+
+      if (data.status === 401) {
+        this.tokenStorage.clear();
+        this.router.navigate(['/login']);
+      }
+
+      // Showing server side error msg
+      if (data.error.message) {
+        data.message = data.error.message;
+      }
+      if (data.error.message != 'The token has expired') {
+        this.showNotify(notify, data);
+      }
+      return of(result as T);
+    };
+  }
+
+  /* To send headers with all requests*/
+  private generateHeaders(): any {
+
+    const headerOptions = {
+      // 'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Access-Control-Allow-Credentials': 'true'
+    };
+
+    /*let headerOptions = {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }; */
+
+    this.tokenStorage.getAccessToken().subscribe(data => {
+      if (!data) {
+        headerOptions['Authorization'] = 'Bearer ' + data;
+      }
+    });
+
+    return new HttpHeaders(headerOptions);
+  }
+
+
+  /* To avoid proceeding further for error messsage in component*/
+  private validateResponse(data: any): any {
+    return data.code == '1' ? data : null;
+  }
+
+
+
+  public change_password(URL, pass) {
+    return this.http.post<Value>(
+      serverURL + URL,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        pass: pass
+      }
+
+    );
+  }
+
+  public searchResource(url, input) {
+    return this.http.post<ResponseHandler>(
+      serverURL + url,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        pass: input
+      });
+  }
+
+  /* Show server notification to users */
+  private showNotify(notify: HttpNotify | null, data: any): void {
+    this.notifyObj = data;
+    const type = (this.notifyObj.status === 200 || this.notifyObj.code === '1') ? true : false;
+
+    // Show Notification based on user's input
+    if ((notify && notify.all) || (notify && notify.error && !type) || (notify && notify.success && type) || type === false) {
+      this.notifyService.Response = { type: type, message: this.notifyObj.message };
+    }
+  }
+
+  public getUserList(url) {
+    return this.http.get<ResponseHandler>(
+      serverURL + url,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+      });
+  }
+
+  public getAutoCompleteData(url) {
+    return this.http.get<ResponseHandler>(
+      serverURL + url,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+      });
+  }
+
+  public sendMail(url, UserEmail) {
+    return this.http.post<ResponseHandler>(
+      serverURL + url,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        pass: UserEmail
+      });
+  }
+  public getProjectName(url, data) {
+    return this.http.post(
+      serverURL + url,
+      {
+        headers: this.generateHeaders(),
+        withCredentials: true,
+        id: data
+      });
+  }
+
+  public checkAvailability(url, parameter) {
+    return this.http.post<ResponseHandler>(serverURL + url, {
+      headers: this.generateHeaders(),
+      withCredentials: true,
+      value: parameter
+    });
+  }
+
+  public releaseCheck(url, parameter) {
+    return this.http.post<ResponseHandler>(serverURL + url, {
+      headers: this.generateHeaders(),
+      withCredentials: true,
+      value: parameter
+    });
+  }
+
+
+
+  public setValue(val) {
+    this.getval = val;
+  }
+  public getValue() {
+    return this.getval;
+  }
+
+
+
+}
